@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>قارئ ومستخرج أرقام IMEI الذكي</title>
+    <!-- Tailwind CSS for modern look -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts (Cairo & Inter) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- External JS Libraries for Camera scanning & OCR (With fallback capabilities) -->
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Cairo', 'Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#f0f7ff',
+                            100: '#e0effe',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Smooth scanning line animation */
+        @keyframes scan {
+            0%, 100% { top: 0%; opacity: 0.8; }
+            50% { top: 100%; opacity: 0.3; }
+        }
+        .scan-line {
+            animation: scan 2s linear infinite;
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.05);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(59, 130, 246, 0.5);
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100 min-h-screen transition-colors duration-200">
+
+    <!-- Navigation / Header Bar -->
+    <header class="bg-white dark:bg-slate-800 shadow-sm border-b border-slate-200 dark:border-slate-700 sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="bg-brand-600 text-white p-2.5 rounded-xl shadow-lg shadow-brand-500/20">
+                    <i class="fa-solid fa-barcode text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg text-slate-800 dark:text-white leading-tight">ماسح IMEI الذكي</h1>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">نظام فحص ذكي متعدد الطرق (باركود / فواتير / شاشات)</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <!-- Gemini API Settings Button -->
+                <button onclick="toggleModal('api-modal')" class="bg-slate-100 dark:bg-slate-700 hover:bg-brand-50 dark:hover:bg-brand-950 hover:text-brand-600 p-2.5 rounded-xl transition" title="إعدادات الذكاء الاصطناعي لخط اليد">
+                    <i class="fa-solid fa-brain"></i>
+                    <span class="hidden md:inline mr-1 text-xs font-semibold">تفعيل التعرف الذكي (خط اليد)</span>
+                </button>
+                
+                <!-- Theme Toggle Button -->
+                <button onclick="toggleDarkMode()" class="bg-slate-100 dark:bg-slate-700 p-2.5 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition">
+                    <i id="theme-icon" class="fa-solid fa-moon"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 py-6">
+        <!-- Toast Notification system (No alert allowed!) -->
+        <div id="toast-container" class="fixed bottom-5 left-5 z-50 flex flex-col gap-2 max-w-sm w-full"></div>
+
+        <!-- Main Target Input Section -->
+        <div class="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-md border border-slate-100 dark:border-slate-700/80 mb-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+                
+                <!-- Selected Device Type -->
+                <div>
+                    <label class="block text-sm font-semibold mb-2 text-slate-600 dark:text-slate-300">نوع الجهاز الممسوح</label>
+                    <div class="relative">
+                        <select id="device-type" class="w-full bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3 text-slate-800 dark:text-white focus:ring-2 focus:ring-brand-500 outline-none transition appearance-none">
+                            <option value="هاتف محمول">📱 هاتف محمول (جوال)</option>
+                            <option value="روتر منزلي">📶 روتر / مودم منزلي</option>
+                            <option value="مودم USB">🔌 مودم USB / دونجل</option>
+                            <option value="ساعة ذكية">⌚ جهاز ذكي آخر</option>
+                        </select>
+                        <i class="fa-solid fa-chevron-down absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"></i>
+                    </div>
+                </div>
+
+                <!-- MAIN IMEI INPUT FIELD -->
+                <div class="md:col-span-2">
+                    <div class="flex justify-between items-center mb-2">
+                        <label class="block text-sm font-semibold text-slate-600 dark:text-slate-300">رقم الـ IMEI المستخرج (15 رقماً)</label>
+                        <span id="luhn-badge" class="hidden text-xs font-bold px-2 py-0.5 rounded-full">--</span>
+                    </div>
+                    <div class="relative flex gap-2">
+                        <div class="relative flex-1">
+                            <input type="text" id="imei-input" maxlength="15" placeholder="اكتشف الـ IMEI باستخدام الكاميرا أو ادخله هنا..." 
+                                   class="w-full tracking-widest text-center text-xl font-bold bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3 text-slate-800 dark:text-white focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none transition">
+                            <button onclick="clearImeiInput()" class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-500 p-1 rounded-lg transition">
+                                <i class="fa-solid fa-circle-xmark"></i>
+                            </button>
+                        </div>
+                        <button onclick="saveCurrentImei()" class="bg-brand-600 hover:bg-brand-700 text-white font-semibold px-6 rounded-xl transition flex items-center gap-2 shadow-lg shadow-brand-500/20">
+                            <i class="fa-solid fa-bookmark"></i>
+                            <span>حفظ السجل</span>
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Scanning Methods Container Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            
+            <!-- Method Card 1: Barcode -->
+            <div onclick="activateScanner('barcode')" id="btn-method-barcode" class="cursor-pointer bg-white dark:bg-slate-800 hover:border-brand-500 dark:hover:border-brand-500 border-2 border-slate-100 dark:border-slate-700 rounded-2xl p-5 shadow-sm transition-all duration-300 transform hover:-translate-y-1 flex flex-col items-center text-center group">
+                <div class="bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 p-4 rounded-full mb-4 group-hover:scale-110 transition duration-300">
+                    <i class="fa-solid fa-barcode text-3xl"></i>
+                </div>
+                <h3 class="font-bold text-lg mb-1">1. مسح الباركود</h3>
+                <p class="text-xs text-slate-500 dark:text-slate-400 max-w-[240px]">توجيه الكاميرا إلى الباركود المطبوع على كرتون الجهاز أو المودم للاستخراج الفوري.</p>
+                <div class="mt-4 inline-flex items-center gap-1.5 text-xs text-brand-600 font-bold">
+                    <span>تشغيل الكاميرا الآن</span>
+                    <i class="fa-solid fa-arrow-left"></i>
+                </div>
+            </div>
+
+            <!-- Method Card 2: Invoice OCR -->
+            <div onclick="activateScanner('invoice')" id="btn-method-invoice" class="cursor-pointer bg-white dark:bg-slate-800 hover:border-emerald-500 dark:hover:border-emerald-500 border-2 border-slate-100 dark:border-slate-700 rounded-2xl p-5 shadow-sm transition-all duration-300 transform hover:-translate-y-1 flex flex-col items-center text-center group">
+                <div class="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 p-4 rounded-full mb-4 group-hover:scale-110 transition duration-300">
+                    <i class="fa-solid fa-file-invoice-dollar text-3xl"></i>
+                </div>
+                <h3 class="font-bold text-lg mb-1">2. قراءة الفاتورة المكتوبة</h3>
+                <p class="text-xs text-slate-500 dark:text-slate-400 max-w-[240px]">مسح الفاتورة (مطبوعة أو مكتوبة بخط اليد) واستخراج الرقم منها بدقة فائقة.</p>
+                <div class="mt-4 inline-flex items-center gap-1.5 text-xs text-emerald-600 font-bold">
+                    <span>التقاط / رفع الصورة</span>
+                    <i class="fa-solid fa-arrow-left"></i>
+                </div>
+            </div>
+
+            <!-- Method Card 3: Screen OCR -->
+            <div onclick="activateScanner('screen')" id="btn-method-screen" class="cursor-pointer bg-white dark:bg-slate-800 hover:border-amber-500 dark:hover:border-amber-500 border-2 border-slate-100 dark:border-slate-700 rounded-2xl p-5 shadow-sm transition-all duration-300 transform hover:-translate-y-1 flex flex-col items-center text-center group">
+                <div class="bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 p-4 rounded-full mb-4 group-hover:scale-110 transition duration-300">
+                    <i class="fa-solid fa-mobile-screen-button text-3xl"></i>
+                </div>
+                <h3 class="font-bold text-lg mb-1">3. قراءة شاشة جوال آخر (*#06#)</h3>
+                <p class="text-xs text-slate-500 dark:text-slate-400 max-w-[240px]">توجيه الكاميرا لشاشة جوال يعرض نافذة الـ IMEI بعد كتابة كود الاستعلام.</p>
+                <div class="mt-4 inline-flex items-center gap-1.5 text-xs text-amber-600 font-bold">
+                    <span>تشغيل القارئ الضوئي</span>
+                    <i class="fa-solid fa-arrow-left"></i>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Live Scanning Workspace (Appears when a method is chosen) -->
+        <div id="scanner-workspace" class="hidden bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-lg overflow-hidden mb-8">
+            <div class="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-6 py-4 flex justify-between items-center flex-wrap gap-2">
+                <div class="flex items-center gap-3">
+                    <span id="scanner-indicator-icon" class="text-xl"></span>
+                    <div>
+                        <h4 id="scanner-workspace-title" class="font-bold text-slate-800 dark:text-white">جاري تحضير الكاميرا...</h4>
+                        <p id="scanner-workspace-subtitle" class="text-xs text-slate-400">يرجى تثبيت الكاميرا وقراءتها بوضوح</p>
+                    </div>
+                </div>
+                <!-- Camera controls -->
+                <div class="flex items-center gap-2">
+                    <button onclick="closeScanner()" class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 px-4 py-2 rounded-xl text-xs font-bold transition">
+                        <i class="fa-solid fa-circle-stop mr-1"></i> إغلاق الكاميرا
+                    </button>
+                </div>
+            </div>
+
+            <div id="fallback-parser-container" class="hidden bg-amber-50 dark:bg-amber-950/20 border-b border-amber-200 dark:border-amber-800/60 p-4 text-xs">
+                <div class="max-w-3xl mx-auto flex flex-col md:flex-row gap-3 items-center justify-between">
+                    <div class="flex gap-2 items-start text-amber-850 dark:text-amber-305">
+                        <i class="fa-solid fa-triangle-exclamation text-base text-amber-500 mt-0.5 animate-bounce"></i>
+                        <div>
+                            <strong class="block mb-1">تنبيه أمني في المتصفح:</strong>
+                            <span>تم رصد قيود أمنية تمنع المعالجة الصورية المحلية (Failed to fetch on Tesseract). يمكنك استخدام بديل الذكاء الاصطناعي (Gemini) أو لصق نص الفاتورة/الرسالة أدناه لاستخراج الـ IMEI مباشرة:</span>
+                        </div>
+                    </div>
+                    <div class="w-full md:w-auto flex gap-1.5 shrink-0">
+                        <textarea id="pasted-text-input" placeholder="الطلب، الفاتورة، أو النص المستخرج هنا..." class="w-full md:w-64 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800 rounded-lg p-2 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500 text-xs" rows="1"></textarea>
+                        <button onclick="extractImeiFromPastedText()" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg font-bold transition">استخراج</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-6 flex flex-col lg:flex-row gap-6 items-stretch justify-center">
+                <!-- Video/Image Live Frame Container -->
+                <div class="relative max-w-lg w-full bg-slate-950 rounded-xl overflow-hidden shadow-inner aspect-[4/3] flex items-center justify-center">
+                    
+                    <!-- Scanner Viewfinder Box -->
+                    <div id="viewfinder" class="absolute inset-0 border-4 border-transparent z-10 pointer-events-none flex items-center justify-center">
+                        <div class="w-72 h-44 border-2 border-brand-500 rounded-lg relative flex items-center justify-center shadow-[0_0_100px_rgba(0,0,0,0.8)]">
+                            <!-- Visual corner accents -->
+                            <div class="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-brand-500 rounded-tl-md"></div>
+                            <div class="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-brand-500 rounded-tr-md"></div>
+                            <div class="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-brand-500 rounded-bl-md"></div>
+                            <div class="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-brand-500 rounded-br-md"></div>
+                            <!-- Red scanning visual animation -->
+                            <div class="absolute left-0 right-0 h-0.5 bg-red-500 scan-line shadow-[0_0_10px_rgba(239,68,68,0.8)]"></div>
+                        </div>
+                    </div>
+
+                    <!-- Live Cam Render Element (Used by html5-qrcode) -->
+                    <div id="qr-reader" class="w-full h-full object-cover"></div>
+
+                    <!-- Manual Photo Capture Mode (for OCR Upload/Capture fallback) -->
+                    <div id="ocr-capture-view" class="hidden absolute inset-0 z-20 bg-slate-900 flex flex-col items-center justify-center p-6 text-center">
+                        <video id="capture-video" class="absolute inset-0 w-full h-full object-cover" autoplay playsinline muted></video>
+                        <canvas id="capture-canvas" class="hidden"></canvas>
+                        
+                        <!-- Overlay interface for capturing -->
+                        <div class="absolute inset-x-0 bottom-4 flex flex-col items-center gap-3 px-6 z-30">
+                            <p class="text-xs bg-black/60 backdrop-blur text-slate-200 px-3 py-1 rounded-full"><i class="fa-solid fa-camera mr-1 text-emerald-400"></i> وجه الكاميرا على منطقة الـ IMEI مباشرة ثم التقط الصورة</p>
+                            <div class="flex gap-2">
+                                <button id="capture-btn" onclick="captureAndOCR()" class="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white px-5 py-3 rounded-full font-bold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition">
+                                    <i class="fa-solid fa-circle-dot text-lg text-white"></i> التقاط وتحليل الصورة
+                                </button>
+                                <label class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-3 rounded-full text-sm font-semibold cursor-pointer transition flex items-center gap-2">
+                                    <i class="fa-solid fa-file-arrow-up"></i>
+                                    <span>اختر ملف صورة</span>
+                                    <input type="file" id="file-upload" accept="image/*" class="hidden" onchange="handleFileUpload(event)">
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Status overlay inside video -->
+                    <div id="scan-status-overlay" class="hidden absolute top-4 left-4 right-4 z-30 bg-black/70 backdrop-blur-sm text-white px-4 py-2 rounded-xl text-xs flex items-center gap-2">
+                        <i class="fa-solid fa-spinner animate-spin text-brand-500"></i>
+                        <span id="scan-status-text">جاري معالجة الكود...</span>
+                    </div>
+
+                </div>
+
+                <!-- Guidance & Help Instructions side card -->
+                <div class="flex-1 flex flex-col justify-between bg-slate-50 dark:bg-slate-900/40 p-5 rounded-xl border border-slate-100 dark:border-slate-700/50">
+                    <div>
+                        <h5 class="font-bold text-sm text-slate-600 dark:text-slate-300 mb-3 border-b border-slate-200 dark:border-slate-800 pb-2">تعليمات المساعدة السريعة:</h5>
+                        <ul id="instructions-list" class="space-y-3 text-xs text-slate-500 dark:text-slate-400">
+                            <!-- Populated dynamically via JS based on selected method -->
+                        </ul>
+                    </div>
+
+                    <div id="gemini-badge-notice" class="mt-4 p-3 bg-brand-500/10 rounded-xl border border-brand-500/20 text-xs text-brand-600 dark:text-brand-400">
+                        <div class="flex gap-2">
+                            <i class="fa-solid fa-wand-magic-sparkles text-sm"></i>
+                            <div>
+                                <strong class="block mb-0.5">تقنية الذكاء الاصطناعي مفعّلة</strong>
+                                <span id="gemini-badge-desc">يتم استخدام نموذج Gemini 3.1 Flash لمعالجة الفواتير اليدوية والصور الصعبة.</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Logs Grid / Panel -->
+        <div class="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-md border border-slate-100 dark:border-slate-700/80">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 border-b border-slate-100 dark:border-slate-700 pb-4">
+                <div>
+                    <h3 class="font-bold text-lg">سجل أرقام الـ IMEI الممسوحة والمحفوظة</h3>
+                    <p class="text-xs text-slate-400">يتم تخزين السجل في المتصفح تلقائياً لحين تصديره</p>
+                </div>
+                <div class="flex gap-2 w-full sm:w-auto">
+                    <button onclick="exportHistory()" class="flex-1 sm:flex-initial bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-file-export text-slate-500"></i> تصدير البيانات (CSV)
+                    </button>
+                    <button onclick="clearHistory()" class="flex-1 sm:flex-initial bg-red-50 hover:bg-red-100 dark:bg-red-950/30 text-red-600 dark:text-red-400 px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-trash-can"></i> مسح السجل بالكامل
+                    </button>
+                </div>
+            </div>
+
+            <!-- Scrollable Table -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-right text-sm">
+                    <thead>
+                        <tr class="bg-slate-50 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400">
+                            <th class="p-3 rounded-r-lg">الرقم المتسلسل</th>
+                            <th class="p-3">رقم الـ IMEI</th>
+                            <th class="p-3">نوع الجهاز</th>
+                            <th class="p-3">تاريخ ووقت الفحص</th>
+                            <th class="p-3">طريقة المسح</th>
+                            <th class="p-3">التحقق اللوحي</th>
+                            <th class="p-3 rounded-l-lg text-center">خيارات</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-table-body" class="divide-y divide-slate-100 dark:divide-slate-700">
+                        <!-- Dynamic content -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Empty State -->
+            <div id="history-empty" class="hidden text-center py-10">
+                <div class="text-slate-300 dark:text-slate-600 text-5xl mb-3">
+                    <i class="fa-solid fa-box-open"></i>
+                </div>
+                <p class="text-sm text-slate-400">لا توجد أرقام ممسوحة في السجل حتى الآن.</p>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Gemini API Key configuration modal -->
+    <div id="api-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4">
+        <div class="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 dark:border-slate-700 transform transition-transform animate-in duration-200">
+            <div class="flex justify-between items-center mb-4 pb-2 border-b border-slate-100 dark:border-slate-700">
+                <div class="flex items-center gap-2 text-brand-600 dark:text-brand-400">
+                    <i class="fa-solid fa-wand-magic-sparkles text-lg"></i>
+                    <h3 class="font-bold text-md text-slate-800 dark:text-white">إعدادات التعرف المتقدم عبر الذكاء الاصطناعي</h3>
+                </div>
+                <button onclick="toggleModal('api-modal')" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                    <i class="fa-solid fa-times text-lg"></i>
+                </button>
+            </div>
+
+            <p class="text-xs text-slate-500 dark:text-slate-400 mb-4 leading-relaxed">
+                لاستخدام ميزة مسح وقراءة الفواتير اليدوية الصعبة جداً وشاشات الجوال بكفاءة 100%، يوصى باستخدام واجهة البرمجة (Gemini API). 
+                <br><strong class="text-brand-600">البرنامج يعمل مسبقاً بمفتاح افتراضي مجاني تلقائي في هذه الصفحة، ولكن يمكنك إدخال مفتاحك الخاص لضمان استجابة سريعة ودائمة.</strong>
+            </p>
+
+            <div class="mb-4">
+                <label class="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-2">مفتاح API الخاص بـ Gemini (اختياري)</label>
+                <div class="relative">
+                    <input type="password" id="api-key-input" placeholder="AIzaSy..." 
+                           class="w-full bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3 text-xs tracking-wider outline-none text-slate-800 dark:text-white focus:border-brand-500 focus:ring-1 focus:ring-brand-500">
+                    <button onclick="toggleApiKeyVisibility()" class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                        <i id="eye-icon" class="fa-solid fa-eye"></i>
+                    </button>
+                </div>
+                <div class="mt-2 flex justify-between items-center">
+                    <a href="https://aistudio.google.com/" target="_blank" class="text-[11px] text-brand-600 hover:underline"><i class="fa-solid fa-arrow-up-right-from-square mr-0.5"></i> احصل على مفتاح مجاني من Google AI Studio</a>
+                </div>
+            </div>
+
+            <div class="flex gap-2">
+                <button onclick="saveApiKey()" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl text-xs transition">حفظ المفتاح والتفعيل</button>
+                <button onclick="toggleModal('api-modal')" class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 px-4 py-2.5 rounded-xl text-xs font-semibold transition">إغلاق</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // System variables & State Management
+        let currentScannerMode = null; // 'barcode', 'invoice', 'screen'
+        let html5QrScanner = null;
+        let activeStream = null;
+        let imeiHistory = [];
+        let geminiApiKey = localStorage.getItem('gemini_api_key') || '';
+
+        // Utility to dynamically inject backup CDN scripts if primary loader gets blocked
+        function loadScript(url) {
+            return new Promise((resolve) => {
+                const script = document.createElement('script');
+                script.src = url;
+                script.onload = () => resolve(true);
+                script.onerror = () => resolve(false);
+                document.head.appendChild(script);
+            });
+        }
+
+        // Auto fallback manager to ensure Html5Qrcode is always defined
+        async function ensureHtml5QrcodeLoaded() {
+            if (typeof Html5Qrcode !== 'undefined') return true;
+            
+            // Backup 1: jsDelivr distribution path
+            let success = await loadScript("https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/dist/html5-qrcode.min.js");
+            if (success && typeof Html5Qrcode !== 'undefined') return true;
+
+            // Backup 2: unpkg stable CDN
+            success = await loadScript("https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js");
+            if (success && typeof Html5Qrcode !== 'undefined') return true;
+
+            // Backup 3: cdnjs fallback
+            success = await loadScript("https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js");
+            if (success && typeof Html5Qrcode !== 'undefined') return true;
+
+            return false;
+        }
+
+        // DOM Elements
+        const imeiInput = document.getElementById('imei-input');
+        const luhnBadge = document.getElementById('luhn-badge');
+        const toastContainer = document.getElementById('toast-container');
+        const historyTableBody = document.getElementById('history-table-body');
+        const historyEmptyState = document.getElementById('history-empty');
+        const instructionsList = document.getElementById('instructions-list');
+        const scanStatusOverlay = document.getElementById('scan-status-overlay');
+        const scanStatusText = document.getElementById('scan-status-text');
+
+        // Setup onload
+        window.onload = function () {
+            // Load custom Key if stored
+            if (geminiApiKey) {
+                document.getElementById('api-key-input').value = geminiApiKey;
+            }
+            
+            // Check Dark Mode preferred
+            if (localStorage.getItem('dark_mode') === 'true' || window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                document.documentElement.classList.add('dark');
+                document.getElementById('theme-icon').className = "fa-solid fa-sun";
+            }
+
+            // Load saved scanner history from local storage
+            loadHistory();
+
+            // Set dynamic change listeners
+            imeiInput.addEventListener('input', (e) => {
+                // Keep only numeric
+                let cleaned = e.target.value.replace(/[^0-9]/g, '');
+                e.target.value = cleaned;
+                validateLuhnAndUI(cleaned);
+            });
+        }
+
+        // Play alert tones natively via Web Audio API (Tone fallback)
+        function playSound(type) {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                
+                if (type === 'success') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
+                    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.15);
+                } else if (type === 'error') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(150, ctx.currentTime); // Buzz
+                    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.45);
+                }
+            } catch (e) {
+                console.warn('Audio context is blocked by user gesture/not supported', e);
+            }
+        }
+
+        // Custom non-blocking visual Toast Notifications
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `flex items-center gap-3 p-4 rounded-xl shadow-lg border text-xs font-bold transition-all duration-300 transform translate-y-2 opacity-0 scale-95`;
+            
+            let bgClass = '';
+            let iconClass = '';
+            
+            if (type === 'success') {
+                bgClass = 'bg-emerald-50 dark:bg-emerald-950/80 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200';
+                iconClass = 'fa-solid fa-circle-check text-emerald-500 text-base';
+            } else if (type === 'error') {
+                bgClass = 'bg-red-50 dark:bg-red-950/80 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200';
+                iconClass = 'fa-solid fa-circle-exclamation text-red-500 text-base';
+            } else {
+                bgClass = 'bg-blue-50 dark:bg-blue-950/80 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200';
+                iconClass = 'fa-solid fa-circle-info text-blue-500 text-base';
+            }
+
+            toast.className += ` ${bgClass}`;
+            toast.innerHTML = `<i class="${iconClass}"></i> <div class="flex-1">${message}</div>`;
+            toastContainer.appendChild(toast);
+
+            // Animate In
+            setTimeout(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0', 'scale-95');
+            }, 10);
+
+            // Close after 4 seconds
+            setTimeout(() => {
+                toast.classList.add('translate-y-2', 'opacity-0', 'scale-95');
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        // Luhn Algorithm validation for IMEI (15 digits)
+        function checkLuhn(imei) {
+            if (!imei || imei.length !== 15) return false;
+            let sum = 0;
+            for (let i = 0; i < 15; i++) {
+                let d = parseInt(imei.charAt(i));
+                if (i % 2 !== 0) { // Double every second digit
+                    d = d * 2;
+                    if (d > 9) d = d - 9;
+                }
+                sum += d;
+            }
+            return (sum % 10 === 0);
+        }
+
+        function validateLuhnAndUI(val) {
+            if (val.length === 0) {
+                luhnBadge.className = "hidden";
+                return;
+            }
+            luhnBadge.classList.remove('hidden');
+            if (val.length === 15) {
+                const isValid = checkLuhn(val);
+                if (isValid) {
+                    luhnBadge.textContent = "رقم IMEI صالح (مطابق لخوارزمية لوهن)";
+                    luhnBadge.className = "text-xs font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300";
+                } else {
+                    luhnBadge.textContent = "رقم IMEI غير صحيح (فشل اختبار لوهن)";
+                    luhnBadge.className = "text-xs font-bold px-3 py-1 rounded-full bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300";
+                }
+            } else {
+                luhnBadge.textContent = `جاري الإدخال (${val.length} من 15)`;
+                luhnBadge.className = "text-xs font-bold px-3 py-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300";
+            }
+        }
+
+        function extractImeiFromPastedText() {
+            const inputField = document.getElementById('pasted-text-input');
+            const text = inputField.value;
+            if (!text.trim()) {
+                showToast("يرجى إدخال أو لصق نص أولاً لتحليله.", "error");
+                return;
+            }
+            const numericSequence = text.replace(/[^0-9]/g, ' ');
+            const potentialImeis = numericSequence.split(/\s+/).filter(word => word.length >= 14 && word.length <= 16);
+            
+            if (potentialImeis.length > 0) {
+                const cleanImei = potentialImeis[0].substring(0, 15);
+                playSound('success');
+                imeiInput.value = cleanImei;
+                validateLuhnAndUI(cleanImei);
+                showToast(`تم استخراج رقم IMEI من النص الملصق بنجاح: ${cleanImei}`, "success");
+                document.getElementById('fallback-parser-container').classList.add('hidden');
+                inputField.value = "";
+                closeScanner();
+            } else {
+                playSound('error');
+                showToast("لم يتم العثور على أي رقم متسلسل مكون من 14-16 خانة في النص المكتوب.", "error");
+            }
+        }
+
+        // Clear the input
+        function clearImeiInput() {
+            imeiInput.value = "";
+            validateLuhnAndUI("");
+        }
+
+        // Activate specialized scanner interface based on chosen methodology
+        function activateScanner(mode) {
+            closeScanner(); // Clear previous
+            currentScannerMode = mode;
+            
+            const workspace = document.getElementById('scanner-workspace');
+            const icon = document.getElementById('scanner-indicator-icon');
+            const title = document.getElementById('scanner-workspace-title');
+            const subtitle = document.getElementById('scanner-workspace-subtitle');
+            const viewfinder = document.getElementById('viewfinder');
+            const ocrView = document.getElementById('ocr-capture-view');
+            const geminiBadgeDesc = document.getElementById('gemini-badge-desc');
+
+            workspace.classList.remove('hidden');
+
+            // Scroll to workspace nicely
+            workspace.scrollIntoView({ behavior: 'smooth' });
+
+            // Set UI details based on selected mode
+            if (mode === 'barcode') {
+                icon.innerHTML = '🎯';
+                title.textContent = 'مسح باركود الـ IMEI من الملصق';
+                subtitle.textContent = 'توجيه الكاميرا إلى الرمز الشريطي (Barcode) المطبوع على الملصق المرفق بالجهاز';
+                viewfinder.classList.remove('hidden');
+                ocrView.classList.add('hidden');
+                initBarcodeScanner();
+                
+                instructionsList.innerHTML = `
+                    <li class="flex items-start gap-2"><i class="fa-solid fa-check text-brand-500 mt-0.5"></i> <span>ابحث عن رمز الباركود المطبوع على ملصق الكرتون أو خلف المودم.</span></li>
+                    <li class="flex items-start gap-2"><i class="fa-solid fa-check text-brand-500 mt-0.5"></i> <span>حافظ على بعد حوالي 10-15 سم لتمكين الكاميرا من التركيز على الخطوط بوضوح.</span></li>
+                    <li class="flex items-start gap-2"><i class="fa-solid fa-check text-brand-500 mt-0.5"></i> <span>يدعم قارئ الباركود كافة التنسيقات العالمية الشهيرة لضمان سرعة الاستجابة.</span></li>
+                `;
+            } else if (mode === 'invoice') {
+                icon.innerHTML = '📝';
+                title.textContent = 'مسح واستخراج الـ IMEI من فاتورة البيع';
+                subtitle.textContent = 'التقط صورة بوضوح للمكان الذي كُتب فيه رقم الـ IMEI (يدوي أو كمبيوتر) ليقوم الذكاء الاصطناعي بتحليله';
+                viewfinder.classList.add('hidden');
+                ocrView.classList.remove('hidden');
+                initOCRScanner();
+
+                instructionsList.innerHTML = `
+                    <li class="flex items-start gap-2"><i class="fa-solid fa-check text-emerald-500 mt-0.5"></i> <span>وجه عدسة الكاميرا مباشرة إلى السطر الذي يحمل رقم الـ IMEI في الفاتورة.</span></li>
+                    <li class="flex items-start gap-2"><i class="fa-solid fa-check text-emerald-500 mt-0.5"></i> <span>إذا كان الرقم مكتوباً بخط اليد، تأكد من استقرار يدك أثناء التصوير للحصول على صورة عالية التباين.</span></li>
+                    <li class="flex items-start gap-2"><i class="fa-solid fa-check text-emerald-500 mt-0.5"></i> <span>يقوم الذكاء الاصطناعي بمعالجة اللغة وقراءة الأرقام العربية والإنجليزية بكفاءة بالغة.</span></li>
+                `;
+            } else if (mode === 'screen') {
+                icon.innerHTML = '📱';
+                title.textContent = 'قراءة الـ IMEI من شاشة هاتف آخر';
+                subtitle.textContent = 'قم بالتقاط صورة لشاشة الهاتف بعد الاتصال بـ #06#* للتعرف الفوري على الأرقام';
+                viewfinder.classList.add('hidden');
+                ocrView.classList.remove('hidden');
+                initOCRScanner();
+
+                instructionsList.innerHTML = `
+                    <li class="flex items-start gap-2"><i class="fa-solid fa-check text-amber-500 mt-0.5"></i> <span>اطلب الكود الموحد <strong class="bg-amber-100 dark:bg-amber-950 px-1 py-0.5 rounded text-amber-800 select-all">*#06#</strong> على الجوال المعني.</span></li>
+                    <li class="flex items-start gap-2"><i class="fa-solid fa-check text-amber-500 mt-0.5"></i> <span>تجنب انعكاسات مصابيح الغرفة على شاشة الهاتف لضمان وضوح الأرقام الظاهرة.</span></li>
+                    <li class="flex items-start gap-2"><i class="fa-solid fa-check text-amber-500 mt-0.5"></i> <span>سيقوم النظام بتصفية وتلقيم الأرقام الـ 15 المكتوبة على الشاشة بشكل ذكي.</span></li>
+                `;
+            }
+        }
+
+        // Close and release all resources from scanners
+        function closeScanner() {
+            document.getElementById('scanner-workspace').classList.add('hidden');
+            document.getElementById('fallback-parser-container').classList.add('hidden');
+            
+            // Stop Barcode Scanner
+            if (html5QrScanner) {
+                html5QrScanner.clear().catch(err => console.log('Clear error:', err));
+                html5QrScanner = null;
+            }
+            
+            // Stop Camera Video Stream (OCR)
+            if (activeStream) {
+                activeStream.getTracks().forEach(track => track.stop());
+                activeStream = null;
+            }
+            
+            const video = document.getElementById('capture-video');
+            video.srcObject = null;
+            scanStatusOverlay.classList.add('hidden');
+            currentScannerMode = null;
+        }
+
+        // Initializing Barcode Scanning module
+        async function initBarcodeScanner() {
+            const isLoaded = await ensureHtml5QrcodeLoaded();
+            if (!isLoaded) {
+                showToast("حدث خطأ: تعذر تحميل ملفات قارئ الباركود البرمجية. يرجى التحقق من اتصالك بالإنترنت.", "error");
+                closeScanner();
+                return;
+            }
+
+            // Setup reader configuration
+            html5QrScanner = new Html5Qrcode("qr-reader");
+            const config = {
+                fps: 20,
+                qrbox: { width: 280, height: 160 },
+                aspectRatio: 1.333333
+            };
+
+            html5QrScanner.start(
+                { facingMode: "environment" }, // Back Camera
+                config,
+                onBarcodeScanSuccess,
+                onBarcodeScanFailure
+            ).catch(err => {
+                showToast("فشل فتح الكاميرا لمسح الباركود: " + err.message, "error");
+                closeScanner();
+            });
+        }
+
+        // Action when barcode is found
+        function onBarcodeScanSuccess(decodedText, decodedResult) {
+            // Check if it represents an IMEI (numeric only, and let's extract digits)
+            let digitsOnly = decodedText.replace(/[^0-9]/g, '');
+            
+            // If the barcode scan matches length of IMEI or contains 15-digits sequence
+            if (digitsOnly.length >= 15) {
+                // Take the first 15 digits
+                const rawImei = digitsOnly.substring(0, 15);
+                playSound('success');
+                imeiInput.value = rawImei;
+                validateLuhnAndUI(rawImei);
+                showToast("تم العثور على الباركود واستخراج IMEI بنجاح!", "success");
+                closeScanner();
+            } else {
+                // Show status but keep scanning
+                scanStatusOverlay.classList.remove('hidden');
+                scanStatusText.textContent = `ممسوح: ${decodedText} (أقل من 15 رقم)`;
+            }
+        }
+
+        function onBarcodeScanFailure(error) {
+            // Keep scanning silently (Standard library callback)
+        }
+
+        // Initializing camera feed for capture/manual photo mode
+        function initOCRScanner() {
+            const video = document.getElementById('capture-video');
+            
+            navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: "environment",
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                },
+                audio: false
+            })
+            .then(stream => {
+                activeStream = stream;
+                video.srcObject = stream;
+                video.play();
+            })
+            .catch(err => {
+                showToast("تعذر تشغيل الكاميرا لوضع الالتقاط الذكي: " + err.message, "error");
+                closeScanner();
+            });
+        }
+
+        // Handle direct file uploads (alternative to live camera capturing)
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.getElementById('capture-canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    
+                    // Trigger OCR processing on loaded image
+                    processCapturedImage(canvas);
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Capture current video frame and forward to OCR engine
+        function captureAndOCR() {
+            const video = document.getElementById('capture-video');
+            const canvas = document.getElementById('capture-canvas');
+            
+            if (!video.srcObject) {
+                showToast("لا توجد إشارة فيديو نشطة لالتقاط الصورة.", "error");
+                return;
+            }
+
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Process
+            processCapturedImage(canvas);
+        }
+
+        // Image Processing pipeline: Local fallback or Gemini API (Highest accuracy)
+        async function processCapturedImage(canvas) {
+            scanStatusOverlay.classList.remove('hidden');
+            scanStatusText.textContent = "جاري تصفية الصورة وتجهيز التحليل الذكي...";
+
+            // Get base64 string
+            const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+
+            // Setup prompt for IMEI retrieval (Arabic/English Context)
+            const promptInstruction = currentScannerMode === 'invoice' 
+                ? "This is a photo of a sales invoice, which might contain printed text or handwritten notes. Analyze the image to locate any 15-digit number representing an IMEI. Extract it precisely. Even if written by hand. Return only the IMEI inside the specified JSON format."
+                : "This is a photo of a mobile phone screen displaying the IMEI after dialling *#06#. Extract the 15-digit IMEI number from the screen elements, avoiding reflections or other non-IMEI numbers. Return only the IMEI inside the specified JSON format.";
+
+            // Attempt Gemini API 
+            try {
+                // Use stored key or environment-filled fallback
+                const currentApiKey = geminiApiKey; 
+                if (!currentApiKey) {
+                    throw new Error("Missing Gemini API Key. Switching to local fallback...");
+                }
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${currentApiKey}`;
+
+                const payload = {
+                    contents: [
+                        {
+                            role: "user",
+                            parts: [
+                                { text: promptInstruction },
+                                {
+                                    inlineData: {
+                                        mimeType: "image/jpeg",
+                                        data: base64Image
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "OBJECT",
+                            properties: {
+                                imeis: {
+                                    type: "ARRAY",
+                                    items: { type: "STRING" }
+                                },
+                                confidence: { type: "NUMBER" },
+                                notes: { type: "STRING" }
+                            },
+                            required: ["imeis"]
+                        }
+                    }
+                };
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error("Gemini API connection error");
+                }
+
+                const result = await response.json();
+                const part = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                
+                if (part) {
+                    const parsedJson = JSON.parse(part);
+                    if (parsedJson.imeis && parsedJson.imeis.length > 0) {
+                        // Extract first valid numeric string
+                        const detectedImei = parsedJson.imeis[0].replace(/[^0-9]/g, '');
+                        if (detectedImei.length >= 14) { // Sometimes Luhn is omitted
+                            onOcrExtractionSuccess(detectedImei);
+                            return;
+                        }
+                    }
+                }
+                
+                throw new Error("No valid IMEI extracted via Gemini");
+
+            } catch (err) {
+                console.warn("Gemini API processing was skipped or failed. Falling back to Local Tesseract.js OCR engine...", err);
+                runTesseractFallback(canvas);
+            }
+        }
+
+        function runTesseractFallback(canvas) {
+            scanStatusText.textContent = "جاري تشغيل محرك القراءة المحلي (تثبيت الحزمة)...";
+
+            try {
+                if (typeof Tesseract === 'undefined') {
+                    throw new Error("Tesseract library is blocked or not fully loaded.");
+                }
+
+                Tesseract.recognize(
+                    canvas,
+                    'eng+ara', // English and Arabic supported
+                    { 
+                        logger: m => {
+                            if (m.status === 'recognizing text') {
+                                scanStatusText.textContent = `تحليل بصري: ${Math.round(m.progress * 100)}%`;
+                            }
+                        }
+                    }
+                ).then(({ data: { text } }) => {
+                    console.log("Raw OCR Result:", text);
+                    
+                    // Regex pattern to search for 15-digit sequences (IMEI)
+                    const imeiRegex = /\b\d{15}\b/g;
+                    const matches = text.match(imeiRegex);
+
+                    if (matches && matches.length > 0) {
+                        onOcrExtractionSuccess(matches[0]);
+                    } else {
+                        // Try to extract any sequential numbers of 14-15 characters from blocks
+                        const softRegex = /[0-9]{14,16}/g;
+                        const softMatches = text.replace(/\s/g, '').match(softRegex);
+                        if (softMatches && softMatches.length > 0) {
+                            onOcrExtractionSuccess(softMatches[0].substring(0, 15));
+                        } else {
+                            playSound('error');
+                            showToast("لم نستطع رصد IMEI واضح بالتحليل البصري المحلي.", "error");
+                            scanStatusOverlay.classList.add('hidden');
+                            // Trigger fallback paste UI
+                            document.getElementById('fallback-parser-container').classList.remove('hidden');
+                        }
+                    }
+                }).catch(err => {
+                    handleOcrError(err);
+                });
+            } catch (error) {
+                handleOcrError(error);
+            }
+        }
+
+        function handleOcrError(err) {
+            console.error("Local OCR failed due to environment security:", err);
+            playSound('error');
+            scanStatusOverlay.classList.add('hidden');
+            
+            // Present clear instruction to use alternative
+            showToast("حدث خطأ في تحميل ملفات التعرف على الصور المحلية. تم تفعيل نظام الاستخراج النصي الاحتياطي.", "error");
+            
+            // Show the fallback input parser
+            document.getElementById('fallback-parser-container').classList.remove('hidden');
+        }
+
+        // Successfully extracted IMEI
+        function onOcrExtractionSuccess(imeiNumber) {
+            playSound('success');
+            imeiInput.value = imeiNumber;
+            validateLuhnAndUI(imeiNumber);
+            showToast(`تم مسح الـ IMEI واستخراجه بنجاح: ${imeiNumber}`, "success");
+            scanStatusOverlay.classList.add('hidden');
+            closeScanner();
+        }
+
+        // Save current displayed IMEI to local database
+        function saveCurrentImei() {
+            const val = imeiInput.value.trim();
+            const device = document.getElementById('device-type').value;
+            
+            if (val.length < 15) {
+                showToast("خطأ: يجب أن يحتوي رقم الـ IMEI على 15 خانة قبل الحفظ.", "error");
+                playSound('error');
+                return;
+            }
+
+            // Duplicate Check
+            const isDuplicate = imeiHistory.some(item => item.imei === val);
+            if (isDuplicate) {
+                showToast("هذا الرقم موجود مسبقاً في سجلاتك المحفوظة", "info");
+                return;
+            }
+
+            const item = {
+                id: Date.now(),
+                imei: val,
+                device: device,
+                date: new Date().toLocaleString('ar-YE'),
+                method: currentScannerMode ? getMethodLabelAr(currentScannerMode) : 'إدخال يدوي',
+                isValid: checkLuhn(val)
+            };
+
+            imeiHistory.unshift(item);
+            saveHistoryToLocalStorage();
+            renderHistoryUI();
+            
+            showToast("تمت إضافة الرقم إلى سجل الهاتف بنجاح", "success");
+            clearImeiInput();
+        }
+
+        function getMethodLabelAr(mode) {
+            if (mode === 'barcode') return 'مسح باركود 🏷️';
+            if (mode === 'invoice') return 'قراءة فاتورة 📝';
+            if (mode === 'screen') return 'شاشة كود 📱';
+            return 'يدوي ✍️';
+        }
+
+        // Render UI elements for saved scanning history
+        function renderHistoryUI() {
+            if (imeiHistory.length === 0) {
+                historyEmptyState.classList.remove('hidden');
+                historyTableBody.innerHTML = '';
+                return;
+            }
+
+            historyEmptyState.classList.add('hidden');
+            historyTableBody.innerHTML = imeiHistory.map((item, index) => `
+                <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition">
+                    <td class="p-3 font-semibold text-slate-400">#${imeiHistory.length - index}</td>
+                    <td class="p-3 font-bold text-slate-800 dark:text-white tracking-wider select-all">${item.imei}</td>
+                    <td class="p-3">${item.device}</td>
+                    <td class="p-3 text-xs text-slate-500 dark:text-slate-400">${item.date}</td>
+                    <td class="p-3 text-xs font-semibold">${item.method}</td>
+                    <td class="p-3">
+                        <span class="px-2 py-0.5 rounded-full text-xs font-bold ${item.isValid ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300'}">
+                            ${item.isValid ? 'سليم' : 'غير سليم'}
+                        </span>
+                    </td>
+                    <td class="p-3 text-center flex justify-center gap-2">
+                        <button onclick="copyToClipboard('${item.imei}')" class="text-brand-500 hover:text-brand-700 p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition" title="نسخ">
+                            <i class="fa-solid fa-copy"></i>
+                        </button>
+                        <button onclick="deleteHistoryItem(${item.id})" class="text-red-500 hover:text-red-700 p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition" title="حذف">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // Copy text helper
+        function copyToClipboard(text) {
+            const el = document.createElement('textarea');
+            el.value = text;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            showToast("تم نسخ الرقم إلى الحافظة بنجاح!", "success");
+        }
+
+        // Storage controllers
+        function saveHistoryToLocalStorage() {
+            localStorage.setItem('imei_history', JSON.stringify(imeiHistory));
+        }
+
+        function loadHistory() {
+            const stored = localStorage.getItem('imei_history');
+            if (stored) {
+                try {
+                    imeiHistory = JSON.parse(stored);
+                    renderHistoryUI();
+                } catch (e) {
+                    console.error('Error loading logs history:', e);
+                }
+            } else {
+                renderHistoryUI();
+            }
+        }
+
+        // Action Buttons from history card
+        function deleteHistoryItem(id) {
+            imeiHistory = imeiHistory.filter(item => item.id !== id);
+            saveHistoryToLocalStorage();
+            renderHistoryUI();
+            showToast("تم إزالة السجل المحدد", "info");
+        }
+
+        function clearHistory() {
+            if (imeiHistory.length === 0) return;
+            // Ask using custom toast confirmation setup since standard alert/confirm are forbidden
+            const confirmDelete = confirm("هل أنت متأكد تماماً من رغبتك في حذف السجل بالكامل؟ لا يمكن التراجع.");
+            if (confirmDelete) {
+                imeiHistory = [];
+                saveHistoryToLocalStorage();
+                renderHistoryUI();
+                showToast("تم مسح السجل بالكامل بنجاح", "success");
+            }
+        }
+
+        // Export collected scan files to universal CSV
+        function exportHistory() {
+            if (imeiHistory.length === 0) {
+                showToast("لا توجد بيانات مسجلة لتصديرها", "error");
+                return;
+            }
+
+            // Constructing tabular structured CSV format
+            let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // Added BOM for proper Arabic text in Excel
+            csvContent += "الرقم التسلسلي,IMEI,نوع الجهاز,التاريخ والوقت,طريقة القراءة,الحالة القانونية\n";
+
+            imeiHistory.forEach((item, index) => {
+                const statusStr = item.isValid ? "صالح" : "فشل التحقق";
+                csvContent += `${imeiHistory.length - index},${item.imei},${item.device},${item.date},${item.method},${statusStr}\n`;
+            });
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `سجل_الـIMEI_المسحوب_${new Date().toLocaleDateString()}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showToast("تم توليد وتنزيل ملف Excel (CSV) بنجاح!", "success");
+        }
+
+        // System Settings / Toggle UI Modals
+        function toggleModal(id) {
+            const modal = document.getElementById(id);
+            modal.classList.toggle('hidden');
+        }
+
+        function toggleApiKeyVisibility() {
+            const input = document.getElementById('api-key-input');
+            const icon = document.getElementById('eye-icon');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.className = "fa-solid fa-eye-slash";
+            } else {
+                input.type = 'password';
+                icon.className = "fa-solid fa-eye";
+            }
+        }
+
+        function saveApiKey() {
+            const inputVal = document.getElementById('api-key-input').value.trim();
+            geminiApiKey = inputVal;
+            localStorage.setItem('gemini_api_key', inputVal);
+            showToast("تم حفظ وتحديث مفتاح التعرف بالذكاء الاصطناعي بنجاح!", "success");
+            toggleModal('api-modal');
+        }
+
+        function toggleDarkMode() {
+            const isDark = document.documentElement.classList.toggle('dark');
+            localStorage.setItem('dark_mode', isDark);
+            document.getElementById('theme-icon').className = isDark ? "fa-solid fa-sun" : "fa-solid fa-moon";
+            showToast(isDark ? "تم تفعيل الوضع الليلي بنجاح" : "تم تفعيل الوضع النهاري بنجاح");
+        }
+    </script>
+</body>
+</html>
